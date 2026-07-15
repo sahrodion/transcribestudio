@@ -1,0 +1,1 @@
+# Keep this directory in git — Docker copies it during the image build.

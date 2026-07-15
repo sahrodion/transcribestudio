@@ -3,9 +3,6 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["openai"],
-  turbopack: {
-    root: process.cwd(),
-  },
   experimental: {
     serverActions: {
       bodySizeLimit: "250mb",
