@@ -22,6 +22,10 @@ import {
   savePersistedStudioState,
   type StudioPhase,
 } from "@/lib/studio-persistence";
+import {
+  toFriendlyUploadError,
+  uploadTranscription,
+} from "@/lib/upload-client";
 import type { PublicJobStatus } from "@/lib/types";
 
 const SESSION_KEY = "ts-session-token";
@@ -280,10 +284,7 @@ export function TranscribeStudioApp() {
           if ((err as Error).name === "AbortError") return;
           clearTimers();
           setPhase("error");
-          const message =
-            err instanceof Error
-              ? err.message
-              : "Your connection was interrupted. Your recording was not completed.";
+          const message = toFriendlyUploadError(err);
           setError(message);
           toast.error(message);
         }
@@ -302,38 +303,25 @@ export function TranscribeStudioApp() {
 
     setSubmitting(true);
     setPhase("uploading");
-    setProgress(8);
+    setProgress(2);
     setStatusMessage("Uploading your recording");
     setError(null);
 
     abortRef.current?.abort();
     abortRef.current = new AbortController();
 
-    const form = new FormData();
-    form.append("file", file);
-    form.append("language", language);
-    if (sessionToken) form.append("sessionToken", sessionToken);
-
     try {
-      const response = await fetch("/api/transcriptions", {
-        method: "POST",
-        body: form,
+      const data = await uploadTranscription({
+        file,
+        language,
+        sessionToken,
         signal: abortRef.current.signal,
+        onProgress: ({ percent }) => {
+          // Map HTTP upload progress into the 0–20% overall band
+          const mapped = Math.max(2, Math.min(18, Math.round(percent * 0.18)));
+          setProgress((prev) => Math.max(prev, mapped));
+        },
       });
-
-      const data = (await response.json()) as {
-        jobId?: string;
-        sessionToken?: string;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "We could not complete this transcription.");
-      }
-
-      if (!data.jobId || !data.sessionToken) {
-        throw new Error("We could not complete this transcription.");
-      }
 
       window.localStorage.setItem(SESSION_KEY, data.sessionToken);
       setSessionToken(data.sessionToken);
@@ -345,10 +333,7 @@ export function TranscribeStudioApp() {
     } catch (err) {
       if ((err as Error).name === "AbortError") return;
       setPhase("error");
-      const message =
-        err instanceof Error
-          ? err.message
-          : "We could not complete this transcription.";
+      const message = toFriendlyUploadError(err);
       setError(message);
       toast.error(message);
     } finally {

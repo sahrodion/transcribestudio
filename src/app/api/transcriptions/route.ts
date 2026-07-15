@@ -2,17 +2,13 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { LANGUAGE_OPTIONS } from "@/lib/languages";
-import { ApplicationError, UserErrors, toUserError, logServerError } from "@/server/errors";
+import { UserErrors, toUserError, logServerError } from "@/server/errors";
 import { getEnv } from "@/server/env";
-import { validateUploadFile } from "@/server/file-validation";
 import { createJob, updateJob } from "@/server/job-store";
 import { startJobProcessing } from "@/server/process-job";
 import { checkRateLimit, getClientIp } from "@/server/rate-limit";
-import {
-  createJobTempDir,
-  writeUploadToTemp,
-  removePath,
-} from "@/server/temporary-files";
+import { parseMultipartUpload } from "@/server/multipart";
+import { createJobTempDir, removePath } from "@/server/temporary-files";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,73 +40,38 @@ export async function POST(request: Request) {
       throw UserErrors.rateLimited();
     }
 
-    const contentType = request.headers.get("content-type") ?? "";
-    if (!contentType.includes("multipart/form-data")) {
-      throw new ApplicationError(
-        "INVALID_CONTENT_TYPE",
-        "Please upload a recording using the form provided.",
-        415,
-      );
-    }
+    const provisionalId = randomUUID();
+    tempDir = await createJobTempDir(provisionalId);
 
-    let form: FormData;
-    try {
-      form = await request.formData();
-    } catch (error) {
-      logServerError("transcriptions-formdata", error);
-      throw new ApplicationError(
-        "UPLOAD_PARSE_FAILED",
-        "We could not read this upload. The file may be too large for the current server settings, or the connection was interrupted.",
-        400,
-        { cause: error },
-      );
-    }
-    const fileEntry = form.get("file");
-    if (!(fileEntry instanceof File)) {
-      throw UserErrors.unsupportedFile();
-    }
+    const uploaded = await parseMultipartUpload(request, tempDir);
 
-    const languageRaw = String(form.get("language") ?? "auto");
-    const sessionRaw = form.get("sessionToken");
     const parsed = bodySchema.safeParse({
-      language: languageRaw,
-      sessionToken:
-        typeof sessionRaw === "string" && sessionRaw.length > 0
-          ? sessionRaw
-          : undefined,
+      language: uploaded.language,
+      sessionToken: uploaded.sessionToken || undefined,
     });
 
     if (!parsed.success) {
       throw UserErrors.unsupportedFile();
     }
 
-    const metadata = validateUploadFile(fileEntry);
     const sessionToken = parsed.data.sessionToken ?? randomUUID();
 
     const job = createJob({
       sessionToken,
       language: parsed.data.language,
-      metadata,
-      tempDir: "",
+      metadata: uploaded.metadata,
+      tempDir,
     });
 
-    tempDir = await createJobTempDir(job.id);
-    updateJob(job.id, { tempDir });
-
-    const buffer = Buffer.from(await fileEntry.arrayBuffer());
-    const uploadPath = await writeUploadToTemp(
-      tempDir,
-      metadata.sanitisedName,
-      buffer,
-    );
-
+    // Keep files under the provisional folder; point the job at it.
     updateJob(job.id, {
+      tempDir,
       status: "queued",
       progress: 18,
       message: "Uploading your recording",
     });
 
-    startJobProcessing(job.id, uploadPath);
+    startJobProcessing(job.id, uploaded.uploadPath);
 
     return NextResponse.json(
       {
