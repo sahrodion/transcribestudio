@@ -1,7 +1,7 @@
 import { z } from "zod";
+import { ApplicationError } from "@/server/errors";
 
-const envSchema = z.object({
-  OPENAI_API_KEY: z.string().min(1, "OPENAI_API_KEY is required"),
+const baseEnvSchema = z.object({
   MAX_UPLOAD_MB: z.coerce.number().positive().default(250),
   MAX_AUDIO_DURATION_MINUTES: z.coerce.number().positive().default(240),
   TRANSCRIPTION_CONCURRENCY: z.coerce.number().int().min(1).max(4).default(2),
@@ -13,15 +13,23 @@ const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
+const envSchema = baseEnvSchema.extend({
+  OPENAI_API_KEY: z
+    .string()
+    .trim()
+    .min(1, "OPENAI_API_KEY is missing. Set it in your host environment variables."),
+});
+
 export type AppEnv = z.infer<typeof envSchema>;
+export type BaseEnv = z.infer<typeof baseEnvSchema>;
 
 let cached: AppEnv | null = null;
+let cachedBase: BaseEnv | null = null;
 
-export function getEnv(): AppEnv {
-  if (cached) return cached;
+function readBaseEnv(): BaseEnv {
+  if (cachedBase) return cachedBase;
 
-  const parsed = envSchema.safeParse({
-    OPENAI_API_KEY: process.env.OPENAI_API_KEY,
+  const parsed = baseEnvSchema.safeParse({
     MAX_UPLOAD_MB: process.env.MAX_UPLOAD_MB,
     MAX_AUDIO_DURATION_MINUTES: process.env.MAX_AUDIO_DURATION_MINUTES,
     TRANSCRIPTION_CONCURRENCY: process.env.TRANSCRIPTION_CONCURRENCY,
@@ -37,14 +45,52 @@ export function getEnv(): AppEnv {
     const message = parsed.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");
-    throw new Error(`Invalid environment configuration: ${message}`);
+    throw new ApplicationError(
+      "INVALID_ENV",
+      "The server is misconfigured. Please contact the site owner.",
+      500,
+      { cause: new Error(message) },
+    );
+  }
+
+  cachedBase = parsed.data;
+  return cachedBase;
+}
+
+export function getEnv(): AppEnv {
+  if (cached) return cached;
+
+  const key = process.env.OPENAI_API_KEY?.trim();
+  if (!key) {
+    throw new ApplicationError(
+      "MISSING_API_KEY",
+      "Transcription is unavailable because OPENAI_API_KEY is not set on the server.",
+      503,
+    );
+  }
+
+  const parsed = envSchema.safeParse({
+    ...readBaseEnv(),
+    OPENAI_API_KEY: key,
+  });
+
+  if (!parsed.success) {
+    const message = parsed.error.issues
+      .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+      .join("; ");
+    console.error("[transcribe-studio:env]", message);
+    throw new ApplicationError(
+      "INVALID_ENV",
+      "Transcription is unavailable because the server environment is misconfigured.",
+      503,
+    );
   }
 
   cached = parsed.data;
   return cached;
 }
 
-/** Soft validation for health checks — does not throw if API key missing in tests. */
+/** Soft validation for health checks — does not throw if API key missing. */
 export function getEnvSafe(): AppEnv | null {
   try {
     return getEnv();
@@ -54,9 +100,12 @@ export function getEnvSafe(): AppEnv | null {
 }
 
 export function maxUploadBytes(): number {
-  return getEnv().MAX_UPLOAD_MB * 1024 * 1024;
+  const mb = Number(process.env.MAX_UPLOAD_MB);
+  const value = Number.isFinite(mb) && mb > 0 ? mb : readBaseEnv().MAX_UPLOAD_MB;
+  return value * 1024 * 1024;
 }
 
 export function resetEnvCache(): void {
   cached = null;
+  cachedBase = null;
 }
