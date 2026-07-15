@@ -32,10 +32,19 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
-# vercel
-.vercel
+# playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# large generated test media
+/tests/fixtures/media/*
+!/tests/fixtures/media/.gitkeep
+!/tests/fixtures/media/README.md
+!/tests/fixtures/media/generators/**
 
 # typescript
 *.tsbuildinfo
-next-env.d.ts

@@ -1,0 +1,18 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-250}
+      MAX_AUDIO_DURATION_MINUTES: ${MAX_AUDIO_DURATION_MINUTES:-240}
+      TRANSCRIPTION_CONCURRENCY: ${TRANSCRIPTION_CONCURRENCY:-2}
+      JOB_TTL_MINUTES: ${JOB_TTL_MINUTES:-60}
+      NEXT_PUBLIC_MAX_UPLOAD_MB: ${NEXT_PUBLIC_MAX_UPLOAD_MB:-250}
+    volumes:
+      - ts-tmp:/tmp
+    restart: unless-stopped
+
+volumes:
+  ts-tmp:

@@ -1,36 +1,91 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Transcribe Studio
 
-## Getting Started
+Premium audio and video transcription. Upload a recording, wait while it is processed securely on the server, then review, edit and export a single clear transcript.
 
-First, run the development server:
+**Turn every recording into clear, usable text.**
+
+## Features
+
+- Drag-and-drop or tap-to-select uploads (MP3, M4A, WAV, MP4, MPEG, MPGA, WebM, OGG, FLAC)
+- Server-side FFmpeg validation, conversion and segmentation
+- OpenAI `gpt-4o-transcribe` (API key never reaches the browser)
+- Job progress with polling — no technical internals exposed
+- Editable transcript with copy, reset, search and TXT / DOCX / PDF export
+- Light and dark themes with system preference support
+- Mobile-first responsive layout
+
+## Requirements
+
+- Node.js 20+
+- FFmpeg and FFprobe on the server `PATH` (included in the Docker image)
+- An OpenAI API key
+
+## Quick start
 
 ```bash
+cp .env.example .env
+# Add OPENAI_API_KEY to .env
+
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment variables
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+| Variable | Default | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | — | Required. Server-only OpenAI key |
+| `MAX_UPLOAD_MB` | `250` | Maximum upload size in megabytes |
+| `MAX_AUDIO_DURATION_MINUTES` | `240` | Maximum media duration |
+| `TRANSCRIPTION_CONCURRENCY` | `2` | Parallel OpenAI segment requests |
+| `JOB_TTL_MINUTES` | `60` | In-memory job expiry |
+| `NEXT_PUBLIC_MAX_UPLOAD_MB` | `250` | Displayed upload limit in the UI |
+| `FFMPEG_PATH` / `FFPROBE_PATH` | `ffmpeg` / `ffprobe` | Binary locations |
 
-## Learn More
+Never set the OpenAI key with a `NEXT_PUBLIC_` prefix.
 
-To learn more about Next.js, take a look at the following resources:
+## Scripts
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run dev          # Development server
+npm run build        # Production build
+npm run start        # Run production server
+npm run lint         # ESLint
+npm run typecheck    # TypeScript
+npm run test         # Vitest unit/component tests
+npm run test:e2e     # Playwright (requires a built app / webServer)
+npm run fixtures:media  # Generate small FFmpeg fixtures locally
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Docker
 
-## Deploy on Vercel
+```bash
+docker compose up --build
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Or:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+docker build -t transcribe-studio .
+docker run --rm -p 3000:3000 -e OPENAI_API_KEY=sk-... transcribe-studio
+```
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Railway, Render and Fly.io notes.
+
+## Architecture (summary)
+
+1. `POST /api/transcriptions` accepts multipart upload, validates the file, stores it in a unique temp job folder, returns a job ID.
+2. Background processing probes media with FFprobe, converts with FFmpeg, splits into valid audio files under OpenAI’s 25 MB limit, transcribes with `gpt-4o-transcribe`, merges text, deletes temps.
+3. `GET /api/transcriptions/[jobId]/status` returns progress and the final transcript when ready.
+
+The UI only shows calm status messages such as “Preparing your recording” and “Transcribing”.
+
+## Privacy
+
+Files are processed for transcription only. Temporary media is deleted after each job. See `/privacy`.
+
+## Licence
+
+Private application. All rights reserved.
